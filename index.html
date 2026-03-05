@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Enterprise CTI Dashboard</title>
+    <script src="https://unpkg.com/three"></script>
+    <script src="https://unpkg.com/globe.gl"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-dark: #070b14; --panel-bg: #111827; --border-color: #1f2937;
+            --text-main: #f3f4f6; --text-muted: #9ca3af; --accent-blue: #38bdf8;
+            --alert-red: #ef4444; --safe-green: #10b981; --warn-yellow: #f59e0b;
+        }
+        body { margin: 0; background: var(--bg-dark); color: var(--text-main); font-family: 'Inter', sans-serif; overflow-x: hidden; display: flex; height: 100vh; }
+        
+        .sidebar { width: 70px; background: var(--panel-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; align-items: center; padding-top: 20px; z-index: 100; flex-shrink: 0; }
+        .nav-icon { width: 40px; height: 40px; margin-bottom: 20px; border-radius: 8px; display: flex; justify-content: center; align-items: center; font-size: 1.2rem; color: var(--text-muted); cursor: pointer; transition: 0.2s; }
+        .nav-icon:hover, .nav-icon.active { background: rgba(56, 189, 248, 0.1); color: var(--accent-blue); }
+        
+        .main-wrapper { flex-grow: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; position: relative; }
+        
+        .cve-ticker-wrap { width: 100%; background: rgba(239, 68, 68, 0.1); border-bottom: 1px solid var(--alert-red); overflow: hidden; padding: 8px 20px; box-sizing: border-box; white-space: nowrap; min-height: 38px; display: flex; align-items: center; }
+        .cve-track { display: flex; gap: 80px; align-items: center; will-change: transform; } 
+        .cve-item { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-main); flex-shrink: 0; }
+        
+        .header-container { padding: 20px 20px 0 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; }
+        .header h1 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: 1px; color: var(--text-main); }
+        
+        .view-section { display: none; padding: 0 20px 20px 20px; }
+        .view-section.active { display: block; }
+
+        .kpi-banner { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .kpi-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 15px; border-left: 3px solid var(--accent-blue); }
+        .kpi-card.red { border-left-color: var(--alert-red); }
+        .kpi-title { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; margin-bottom: 5px; }
+        .kpi-value { font-size: 1.5rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; }
+        
+        .dashboard-grid { display: grid; grid-template-columns: 350px 1fr 350px; grid-template-rows: 400px 350px; gap: 20px; }
+        
+        .threat-page-container { display: flex; flex-direction: column; gap: 25px; }
+        .threat-page-columns { display: grid; grid-template-columns: 1fr 350px; gap: 25px; align-items: start; }
+        .threat-charts-sidebar { display: flex; flex-direction: column; gap: 20px; overflow: hidden; width: 100%; }
+        .threat-feed-container { width: 100%; overflow: hidden; }
+        
+        .panel { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; width: 100%; }
+        .panel-header { background: #192231; padding: 12px 15px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; }
+        .panel-content { padding: 15px; flex-grow: 1; overflow: hidden; position: relative; width: 100%; box-sizing: border-box; }
+        
+        canvas { max-width: 100%; max-height: 100%; }
+
+        .threat-list { display: flex; flex-direction: column; gap: 12px; }
+        .threat-row { background: #0b1120; border: 1px solid #1e293b; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); animation: slideDownIn 0.5s ease-out forwards; cursor: pointer; transition: all 0.2s ease; border-left: 3px solid transparent; }
+        .threat-row:hover { border-left: 3px solid var(--accent-blue); background: #111827; transform: translateX(4px); box-shadow: -2px 4px 12px rgba(56, 189, 248, 0.1); }
+        @keyframes slideDownIn { 0% { opacity: 0; transform: translateY(-20px) scale(0.98); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+        
+        .threat-row-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 10px; }
+        .threat-title { font-weight: bold; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
+        .threat-badge { font-size: 0.7rem; font-weight: bold; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; }
+        .badge-critical { border-color: var(--alert-red); color: var(--alert-red); background: rgba(239, 68, 68, 0.1); }
+        .badge-safe { border-color: var(--safe-green); color: var(--safe-green); background: rgba(16, 185, 129, 0.1); }
+        
+        .threat-desc { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-muted); word-break: break-all; margin: 5px 0; }
+        .threat-details { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .threat-detail-item { display: flex; flex-direction: column; font-size: 0.75rem; }
+        .threat-detail-label { color: #64748b; font-weight: 600; text-transform: uppercase; }
+        .threat-detail-value { color: var(--text-main); font-family: 'JetBrains Mono', monospace; }
+        .threat-footer { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted); margin-top: 5px; }
+
+        /* MODALS */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(7, 11, 20, 0.85); backdrop-filter: blur(5px); display: flex; justify-content: center; align-items: center; z-index: 9999; opacity: 0; pointer-events: none; transition: 0.3s ease; }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+        .modal-content { background: #0b1120; border: 1px solid #1f2937; border-top: 4px solid var(--alert-red); border-radius: 8px; width: 650px; max-width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.6); transform: translateY(-20px) scale(0.98); transition: 0.3s ease; display: flex; flex-direction: column; overflow: hidden; }
+        .modal-overlay.active .modal-content { transform: translateY(0) scale(1); }
+        .modal-header { padding: 15px 20px; border-bottom: 1px solid #1f2937; display: flex; justify-content: space-between; align-items: center; background: #111827; }
+        .modal-title { font-size: 1.1rem; font-weight: 800; display: flex; align-items: center; gap: 10px; letter-spacing: 0.5px; }
+        .modal-close { cursor: pointer; color: var(--text-muted); font-size: 1.2rem; transition: 0.2s; font-family: sans-serif; }
+        .modal-close:hover { color: var(--text-main); }
+        .modal-body { padding: 25px; display: flex; flex-direction: column; gap: 15px; }
+        .modal-section { background: rgba(255,255,255,0.02); padding: 15px; border-radius: 6px; border: 1px solid #1f2937; }
+        .modal-label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; font-weight: 800; }
+        .modal-value { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; color: var(--text-main); word-break: break-all; }
+        
+        .ai-analysis { font-size: 0.85rem; line-height: 1.6; color: #d1d5db; border-left: 3px solid var(--accent-blue); padding-left: 12px; }
+        .containment-btn { background: rgba(239, 68, 68, 0.1); color: var(--alert-red); border: 1px solid var(--alert-red); padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; text-align: center; margin-top: 10px; transition: 0.2s; letter-spacing: 1px; }
+        .containment-btn:hover { background: var(--alert-red); color: white; }
+
+        .scanner-input { width: 100%; padding: 12px; background: #070b14; border: 1px solid var(--border-color); color: white; border-radius: 6px; margin-bottom: 10px; font-family: 'JetBrains Mono'; box-sizing: border-box; }
+        .scanner-btn { width: 100%; padding: 12px; background: var(--accent-blue); color: #000; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        .scan-result-box { margin-top: 15px; padding: 15px; background: #070b14; border-radius: 6px; border: 1px solid var(--border-color); font-family: 'JetBrains Mono'; font-size: 0.85rem; min-height: 100px; }
+        .globe-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+        .feed-list { list-style: none; padding: 0; margin: 0; }
+        .feed-item { padding: 10px 0; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; }
+        .feed-date { color: var(--accent-blue); font-size: 0.7rem; font-family: 'JetBrains Mono'; display: block; margin-bottom: 3px; }
+        .map-iframe { width: 100%; height: 100%; border: none; position: absolute; top: 0; left: 0; }
+        .map-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(7, 11, 20, 0.9); display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-family: 'JetBrains Mono'; font-size: 0.9rem; z-index: 10; transition: 0.3s; }
+        .hidden { opacity: 0; pointer-events: none; }
+        ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: var(--bg-dark); } ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="nav-icon active" title="Dashboard" onclick="switchView('view-dashboard', this)">📊</div>
+        <div class="nav-icon" title="Live Threats" onclick="switchView('view-threats', this)">🚨</div>
+        <div class="nav-icon" title="Browser Integrations" onclick="openExtensionModal()">🧩</div>
+    </div>
+
+    <div id="threatModal" class="modal-overlay" onclick="if(event.target === this) closeThreatModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">🛡️ Threat Details</div>
+                <div class="modal-close" onclick="closeThreatModal()">✖</div>
+            </div>
+            <div class="modal-body">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="modal-section">
+                        <div class="modal-label">Extracted Payload</div>
+                        <div class="modal-value" id="modalUrl" style="color: var(--alert-red); font-size: 0.75rem;"></div>
+                    </div>
+                    <div class="modal-section">
+                        <div class="modal-label">Source Node / Domain</div>
+                        <div class="modal-value" id="modalSource" style="font-size: 0.8rem;"></div>
+                    </div>
+                </div>
+                
+                <div class="modal-section" style="padding: 0; position: relative; height: 180px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000;">
+                    <div id="modalMapOverlay" class="map-overlay" style="z-index: 10; background: rgba(7, 11, 20, 0.95); color: var(--accent-blue);">[📡] Initiating Live Geo-Trace...</div>
+                    <iframe id="modalMap" class="map-iframe" src="" allowfullscreen="" loading="lazy"></iframe>
+                </div>
+
+                <div class="modal-section" style="padding: 10px 15px;">
+                    <div class="modal-label" style="margin-bottom: 5px;">🧠 Automated SIEM Intelligence Analysis</div>
+                    <div class="ai-analysis" id="modalAnalysis"></div>
+                </div>
+                <button class="containment-btn" onclick="closeThreatModal()">INITIATE NETWORK CONTAINMENT</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="extensionModal" class="modal-overlay" onclick="if(event.target === this) closeExtensionModal()">
+        <div class="modal-content" style="width: 600px; border-top-color: var(--accent-blue);">
+            <div class="modal-header">
+                <div class="modal-title">🧩 Secure Endpoint Provisioning</div>
+                <div class="modal-close" onclick="closeExtensionModal()">✖</div>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 15px; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="font-size: 2.2rem;">🛡️</div>
+                        <div>
+                            <div style="font-weight: 800; color: var(--text-main); font-size: 1rem;">CTI Zero-Click Scanner</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 3px;">Proprietary internal tool. Scans URLs against local SOC database before execution.</div>
+                        </div>
+                    </div>
+                    <button class="containment-btn" style="margin: 0; padding: 10px 15px; font-size: 0.75rem; border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(56, 189, 248, 0.1);" onclick="window.location.href='/download-extension'">SECURE DOWNLOAD (.ZIP)</button>
+                </div>
+
+                <div style="background: rgba(245, 158, 11, 0.1); border-left: 3px solid var(--warn-yellow); padding: 12px; font-size: 0.75rem; color: var(--text-muted); margin-top: 15px;">
+                    <strong style="color: var(--warn-yellow);">DEPLOYMENT INSTRUCTIONS:</strong><br>
+                    1. Extract the downloaded .zip file on your local machine.<br>
+                    2. Navigate to <b style="color: var(--text-main);">chrome://extensions/</b> in your browser.<br>
+                    3. Enable "Developer Mode" in the top right corner.<br>
+                    4. Click "Load unpacked" and select the extracted folder to deploy.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-wrapper">
+        <div class="cve-ticker-wrap">
+            <div id="cve-track" class="cve-track">
+                <div class="cve-item"><span style="color: var(--warn-yellow); font-weight: bold;">[📡 AWAITING NIST VULNERABILITY DATABASE SYNC...]</span></div>
+            </div>
+        </div>
+
+        <div class="header-container">
+            <div class="header">
+                <h1>🛡️ CTI COMMAND CENTER</h1>
+                <div style="font-family: 'JetBrains Mono'; font-size: 0.85rem; color: var(--text-muted);">Status: <span style="color: var(--safe-green);">ONLINE</span></div>
+            </div>
+        </div>
+        
+        <div id="view-dashboard" class="view-section active">
+            <div class="kpi-banner">
+                <div class="kpi-card red" id="card-threat"><div class="kpi-title">Global Threat Level</div><div class="kpi-value" id="kpi-threat" style="color: var(--alert-red);">ELEVATED</div></div>
+                <div class="kpi-card" id="card-scans"><div class="kpi-title">Session Scans</div><div class="kpi-value" id="kpi-scans">0</div></div>
+                <div class="kpi-card"><div class="kpi-title">Active Data Nodes</div><div class="kpi-value">5</div></div>
+                <div class="kpi-card" id="card-blocked"><div class="kpi-title">Threats Isolated</div><div class="kpi-value" id="kpi-blocked">0</div></div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="panel" style="grid-row: 1 / 3; grid-column: 1;">
+                    <div class="panel-header"><span>🔍 Universal IoC Analysis</span></div>
+                    <div class="panel-content">
+                        <input type="text" id="urlInput" class="scanner-input" placeholder="Enter URL, IP Address, or File Hash">
+                        <button class="scanner-btn" onclick="checkLink()">INITIATE ANALYSIS</button>
+                        <div class="scan-result-box" id="result"><span style="color: var(--text-muted);">Awaiting input...</span></div>
+                        <h4 style="margin-top: 30px; margin-bottom: 10px; font-size: 0.8rem; color: var(--text-muted);">SESSION SCANS</h4>
+                        <ul class="feed-list" id="recentScansList"></ul> 
+                    </div>
+                </div>
+
+                <div class="panel" style="grid-row: 1; grid-column: 2;">
+                    <div class="panel-header"><span>🌍 3D Threat Telemetry</span><span style="color: var(--accent-blue);">● LIVE</span></div>
+                    <div class="panel-content" style="padding: 0;"><div id="globeViz" class="globe-container"></div></div>
+                </div>
+                <div class="panel" style="grid-row: 2; grid-column: 2;">
+                    <div class="panel-header"><span>📍 Tactical 2D View</span></div>
+                    <div class="panel-content" style="padding: 0; position: relative;">
+                        <div id="mapOverlay" class="map-overlay">Awaiting target coordinates...</div>
+                        <iframe id="googleMap" class="map-iframe" src="" allowfullscreen="" loading="lazy"></iframe>
+                    </div>
+                </div>
+
+                <div class="panel" style="grid-row: 1; grid-column: 3;">
+                    <div class="panel-header"><span>📊 Threat Vectors</span></div>
+                    <div class="panel-content" style="display: flex; justify-content: center; align-items: center;"><div style="width: 100%; height: 100%; position: relative;"><canvas id="chartDonut"></canvas></div></div>
+                </div>
+                <div class="panel" style="grid-row: 2; grid-column: 3;">
+                    <div class="panel-header"><span>📡 Global OSINT Feed</span></div>
+                    <div class="panel-content"><div id="newsContainer" class="feed-list"><span style="color: var(--text-muted);">Loading OSINT...</span></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="view-threats" class="view-section">
+            <div class="threat-page-container">
+                <div class="panel" style="width: 100%; height: 220px;">
+                    <div class="panel-header"><span>📊 Live Threat Counts</span></div>
+                    <div class="panel-content" style="padding: 10px;">
+                        <canvas id="liveThreatChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="threat-page-columns">
+                    <div class="threat-feed-container">
+                        <div id="live-threat-list" class="threat-list"></div>
+                    </div>
+
+                    <div class="threat-charts-sidebar">
+                        <div class="panel" style="height: 200px;">
+                            <div class="panel-header"><span>🌐 Targeted Regions</span><span style="color: var(--text-muted);">↓</span></div>
+                            <div class="panel-content" style="padding: 10px;"><canvas id="chartRegions"></canvas></div>
+                        </div>
+                        <div class="panel" style="height: 200px;">
+                            <div class="panel-header"><span>🏳️ Targeted Countries</span><span style="color: var(--text-muted);">↓</span></div>
+                            <div class="panel-content" style="padding: 10px;"><canvas id="chartCountries"></canvas></div>
+                        </div>
+                        <div class="panel" style="height: 200px;">
+                            <div class="panel-header"><span>🏢 Targeted Sectors</span><span style="color: var(--text-muted);">↓</span></div>
+                            <div class="panel-content" style="padding: 10px;"><canvas id="chartSectors"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 🔥 NEW EXTENSION MODAL LOGIC 🔥 ---
+        function openExtensionModal() { document.getElementById('extensionModal').classList.add('active'); }
+        function closeExtensionModal() { document.getElementById('extensionModal').classList.remove('active'); }
+
+        async function openThreatModal(url, category, icon, time) {
+            const modal = document.getElementById('threatModal');
+            document.getElementById('modalTitle').innerHTML = `${icon} ${category} Intelligence Report`;
+            document.getElementById('modalUrl').innerText = url;
+            document.getElementById('modalSource').innerText = getDomain(url);
+            
+            const mapOverlay = document.getElementById('modalMapOverlay');
+            const mapIframe = document.getElementById('modalMap');
+            mapOverlay.classList.remove('hidden');
+            mapOverlay.innerHTML = "[📡] Tracing IP & Acquiring Satellite Imagery...";
+            mapIframe.src = "";
+
+            let analysis = "";
+            if (category === "PHISHING") analysis = "High confidence of credential harvesting. The URL attempts to impersonate a legitimate service authentication portal. Immediate domain blacklisting at the Secure Web Gateway is recommended.";
+            else if (category === "RANSOMWARE") analysis = "Critical threat pattern detected. Payload matches known ransomware distribution heuristics. Initiate endpoint isolation immediately to prevent lateral movement and unauthorized file encryption.";
+            else if (category === "BOTNET") analysis = "Command and Control (C2) communication detected. Internal node is attempting to connect to a known botnet orchestrator. Terminate connection at edge firewall and scan internal subnet.";
+            else if (category === "TROJAN") analysis = "Suspicious executable dropper detected. This payload often establishes backdoor access and downloads secondary malware components. Quarantine affected endpoint and initiate deep memory scan.";
+            else analysis = "Generic malicious payload detected via global telemetry. URL exhibits structural anomalies consistent with automated attack frameworks. Monitor network traffic logs for similar indicators.";
+            
+            document.getElementById('modalAnalysis').innerText = analysis;
+            modal.classList.add('active');
+
+            try {
+                const res = await fetch('/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url }) });
+                const data = await res.json();
+                
+                if (data.location && data.location.lat !== 0) {
+                    mapIframe.src = `https://maps.google.com/maps?q=${data.location.lat},${data.location.lon}&hl=en&z=11&output=embed`;
+                    mapOverlay.classList.add('hidden');
+                    document.getElementById('modalSource').innerHTML = `${getDomain(url)} <br><span style="color: var(--warn-yellow); font-family: 'JetBrains Mono'; font-size: 0.8rem;">Traced IP: ${data.ipAddress}</span>`;
+                } else { mapOverlay.innerHTML = "<span style='color: var(--alert-red);'>[!] Trace Failed: Target Behind Proxy/VPN</span>"; }
+            } catch (e) { mapOverlay.innerHTML = "<span style='color: var(--alert-red);'>[!] Telemetry Error: Target Server Unresponsive</span>"; }
+        }
+
+        function closeThreatModal() { document.getElementById('threatModal').classList.remove('active'); }
+
+        async function fetchCVEData() {
+            try { const res = await fetch('/cve-feed'); return await res.json(); } 
+            catch (e) { return [{ id: "CVE-2024-3094", severity: "CRITICAL", description: "Malicious code discovered in upstream xz/liblzma packages." }]; }
+        }
+        function buildCVETrack(cveList) {
+            const track = document.getElementById('cve-track'); track.innerHTML = '';
+            cveList.forEach(cve => {
+                const div = document.createElement('div'); div.className = 'cve-item';
+                div.innerHTML = `🚨 <strong style="color: var(--alert-red); margin-right: 8px;">${cve.id}</strong> <span style="color: var(--warn-yellow); margin-right: 8px;">[Severity: ${cve.severity}]</span> ${cve.description}`;
+                track.appendChild(div);
+            });
+        }
+        async function initCVESlider() {
+            const initialCVEs = await fetchCVEData(); buildCVETrack(initialCVEs);
+            if(initialCVEs.length > 0) setTimeout(rotateCVE, 2000); 
+            setInterval(async () => {
+                const newCVEs = await fetchCVEData();
+                if (newCVEs && newCVEs.length > 0) {
+                    const track = document.getElementById('cve-track');
+                    if (track.style.transform === 'translateX(0px)' || track.style.transform === '') buildCVETrack(newCVEs);
+                    else setTimeout(() => buildCVETrack(newCVEs), 3000);
+                }
+            }, 600000);
+        }
+        function rotateCVE() {
+            const track = document.getElementById('cve-track');
+            if(!track || track.children.length === 0) return;
+            const firstItem = track.children[0];
+            const moveDistance = firstItem.offsetWidth + 80; 
+            track.style.transition = 'transform 2.5s ease-in-out';
+            track.style.transform = `translateX(-${moveDistance}px)`;
+            setTimeout(() => {
+                track.style.transition = 'none'; track.appendChild(firstItem); track.style.transform = 'translateX(0)'; 
+                setTimeout(rotateCVE, 4000); 
+            }, 2500); 
+        }
+
+        let liveThreatCounts = { 'MALWARE': 0, 'PHISHING': 0, 'RANSOMWARE': 0, 'BOTNET': 0, 'TROJAN': 0 };
+        let liveThreatChartInstance = null;
+        function initLiveThreatChart() {
+            if (liveThreatChartInstance) return; 
+            const ctx = document.getElementById('liveThreatChart').getContext('2d');
+            Chart.defaults.color = '#9ca3af'; Chart.defaults.font.family = 'Inter';
+            liveThreatChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: { labels: ['Malware', 'Phishing', 'Ransomware', 'Botnet', 'Trojan'], datasets: [{ data: [0, 0, 0, 0, 0], backgroundColor: ['#ef4444', '#f59e0b', '#8b5cf6', '#3b82f6', '#10b981'], borderRadius: 4 }] },
+                options: { layout: { padding: { right: 20 } }, indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false, color: '#1f2937' }, min: 0, max: 10, ticks: { stepSize: 5 } }, y: { grid: { display: false } } } }
+            });
+        }
+
+        let threatInterval = null; let chartsRendered = false; let threatQueue = []; 
+        function switchView(viewId, element) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-icon').forEach(icon => icon.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active'); element.classList.add('active');
+            if (threatInterval) clearInterval(threatInterval);
+            if(viewId === 'view-dashboard') window.dispatchEvent(new Event('resize')); 
+            else if (viewId === 'view-threats') {
+                if(!chartsRendered) { renderBarCharts(); initLiveThreatChart(); chartsRendered = true; }
+                injectNextThreat(); threatInterval = setInterval(injectNextThreat, 5000); 
+            }
+        }
+
+        function getDomain(urlStr) { try { return new URL(urlStr).hostname; } catch(e) { return "unknown-host.com"; } }
+
+        async function injectNextThreat() {
+            if(threatQueue.length === 0) {
+                try {
+                    const res = await fetch('http://localhost:3000/live-threats');
+                    if (!res.ok) throw new Error(); threatQueue = await res.json();
+                } catch (e) {
+                    const rIP = () => Math.floor(Math.random() * 255); 
+                    threatQueue = [{ url: `http://${rIP()}.${rIP()}.${rIP()}.${rIP()}/payload.bin`, status: "online", tags: ["Malware"], date: new Date().toISOString(), reporter: "System Monitor" }];
+                }
+            }
+
+            const threat = threatQueue.pop(); if(!threat) return;
+            const isCritical = threat.status === 'online';
+            const badgeClass = isCritical ? 'badge-critical' : 'badge-safe';
+            const badgeText = isCritical ? 'CRITICAL' : 'BLOCKED';
+            const rawTag = (threat.tags && threat.tags.length > 0) ? threat.tags[0].toUpperCase() : "MALWARE";
+            
+            let category = 'MALWARE';
+            if(rawTag.includes('PHISH')) category = 'PHISHING';
+            else if(rawTag.includes('RANSOM')) category = 'RANSOMWARE';
+            else if(rawTag.includes('BOT')) category = 'BOTNET';
+            else if(rawTag.includes('TROJAN') || rawTag.includes('COBALT')) category = 'TROJAN';
+            
+            liveThreatCounts[category]++;
+            if (liveThreatChartInstance) {
+                liveThreatChartInstance.data.datasets[0].data = [ liveThreatCounts['MALWARE'], liveThreatCounts['PHISHING'], liveThreatCounts['RANSOMWARE'], liveThreatCounts['BOTNET'], liveThreatCounts['TROJAN'] ];
+                const highestValue = Math.max(...liveThreatChartInstance.data.datasets[0].data);
+                let maxVal = Math.max(10, Math.ceil((highestValue + 1) / 10) * 10);
+                liveThreatChartInstance.options.scales.x.max = maxVal;
+                liveThreatChartInstance.options.scales.x.ticks.stepSize = maxVal / 2; 
+                liveThreatChartInstance.update();
+            }
+
+            const icon = category === 'PHISHING' ? '🎣' : (category === 'RANSOMWARE' ? '🔒' : '🛡️');
+            const timeStr = new Date().toLocaleTimeString();
+            const container = document.getElementById('live-threat-list');
+            const newRow = document.createElement('div');
+            newRow.className = 'threat-row'; 
+            newRow.onclick = () => openThreatModal(threat.url, category, icon, timeStr);
+            newRow.innerHTML = `<div class="threat-row-header"><div class="threat-title">${icon} ${category} Activity Detected</div><div class="threat-badge ${badgeClass}">${badgeText}</div></div><div class="threat-desc">Malicious Payload: ${threat.url}</div><div class="threat-details"><div class="threat-detail-item"><span class="threat-detail-label">Source Node</span><span class="threat-detail-value">${getDomain(threat.url)}</span></div><div class="threat-detail-item"><span class="threat-detail-label">Protocol</span><span class="threat-detail-value">${threat.url.startsWith('https') ? 'HTTPS (Port 443)' : 'HTTP (Port 80)'}</span></div></div><div class="threat-footer"><span>🕒 ${timeStr}</span><span>Reporter: ${threat.reporter || 'System'}</span></div>`;
+
+            container.prepend(newRow);
+            if(container.children.length > 7) container.removeChild(container.lastChild);
+        }
+
+        function renderDonutChart() { Chart.defaults.color = '#9ca3af'; Chart.defaults.font.family = 'Inter'; new Chart(document.getElementById('chartDonut'), { type: 'doughnut', data: { labels: ['Ransomware', 'Phishing', 'Botnet', 'SQLi'], datasets: [{ data: [45, 25, 20, 10], backgroundColor: ['#ef4444', '#f59e0b', '#38bdf8', '#8b5cf6'], borderWidth: 0 }] }, options: { maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 12 } } } } }); }
+        function renderBarCharts() {
+            const barOptions = { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false, color: '#1f2937' }, ticks: { font: { size: 10 } } }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } };
+            new Chart(document.getElementById('chartRegions'), { type: 'bar', data: { labels: ['Europe', 'Asia', 'Americas', 'Middle East', 'Africa', 'Oceania'], datasets: [{ data: [1240, 1100, 850, 420, 150, 80], backgroundColor: '#a3e635', borderRadius: 4 }] }, options: barOptions });
+            new Chart(document.getElementById('chartCountries'), { type: 'bar', data: { labels: ['USA', 'Germany', 'Japan', 'UK', 'France', 'India', 'China', 'Canada'], datasets: [{ data: [950, 820, 780, 600, 580, 450, 400, 310], backgroundColor: '#3b82f6', borderRadius: 4 }] }, options: barOptions });
+            new Chart(document.getElementById('chartSectors'), { type: 'bar', data: { labels: ['Manufacturing', 'Government', 'Finance', 'Technology', 'Healthcare', 'Retail', 'Energy'], datasets: [{ data: [1300, 1150, 950, 800, 600, 450, 300], backgroundColor: '#06b6d4', borderRadius: 4 }] }, options: barOptions });
+        }
+        const globeContainer = document.getElementById('globeViz');
+        const world = Globe()(globeContainer).width(globeContainer.clientWidth).height(globeContainer.clientHeight).globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg').backgroundColor('#070b14').pointAltitude(0.2).pointRadius(1.5).pointColor('color').ringsData([]).ringColor('color').ringMaxRadius(8).ringPropagationSpeed(3).ringRepeatPeriod(800).arcColor('color').arcDashLength(0.4).arcDashGap(0.2).arcDashAnimateTime(1500).arcStroke(1);
+        world.controls().autoRotate = true; world.controls().autoRotateSpeed = 0.5; world.pointOfView({ altitude: 2.2 });
+        window.addEventListener('resize', () => { world.width(globeContainer.clientWidth); world.height(globeContainer.clientHeight); });
+
+        let sessionScans = 0; let sessionThreats = 0;
+        function updateKPIs(isMalicious) { sessionScans++; document.getElementById('kpi-scans').innerText = sessionScans; if (isMalicious) { sessionThreats++; document.getElementById('kpi-blocked').innerText = sessionThreats; document.getElementById('kpi-threat').innerText = "CRITICAL"; } }
+
+        async function checkLink() {
+            const val = document.getElementById('urlInput').value; const display = document.getElementById('result'); const mapOverlay = document.getElementById('mapOverlay'); const mapIframe = document.getElementById('googleMap');
+            if(!val) return; 
+            display.innerHTML = `<span style="color: var(--warn-yellow);">[PROCESSING] Resolving DNS & telemetry...</span>`; mapOverlay.classList.remove('hidden'); mapOverlay.innerHTML = "Acquiring Target Satellite Imagery...";
+            try {
+                const res = await fetch('/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: val }) });
+                const data = await res.json(); const isDanger = data.status === "DANGER"; const color = isDanger ? "var(--alert-red)" : "var(--safe-green)";
+                display.innerHTML = `<div style="color: ${color}; font-weight: bold; font-size: 1rem; margin-bottom: 10px;">[${isDanger?"MALICIOUS":"CLEAN"}] ${data.message}</div><div style="color: var(--text-muted);">> <b>IoC Type:</b> <span style="color: var(--text-main);">${data.iocType}</span><br>> <b>IP Address:</b> <span style="color: var(--text-main);">${data.ipAddress}</span><br>> <b>Location:</b> ${data.location.city}, ${data.location.country}<br>> <b>External AV Engines:</b> <span style="color: ${color}; font-weight:bold;">${data.malicious || 0} / ${data.totalEngines || 0}</span> engines flagged<br></div>`;
+                updateKPIs(isDanger);
+                const list = document.getElementById('recentScansList'); const newLi = document.createElement('li'); newLi.className = 'feed-item'; newLi.innerHTML = `<span style="color: ${color};">[${data.iocType}]</span> ${data.input.length>25?data.input.substring(0,22)+'...':data.input} <span style="float: right; color: var(--text-muted);">${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`; list.insertBefore(newLi, list.firstChild); if(list.children.length > 5) list.removeChild(list.lastChild); 
+                if (data.location.lat !== 0) {
+                    const pinColor = isDanger ? "#ef4444" : "#10b981"; world.pointOfView({ lat: data.location.lat, lng: data.location.lon, altitude: 1.5 }, 1500); world.pointsData([{ lat: data.location.lat, lng: data.location.lon, size: 1.5, color: pinColor }]); world.ringsData([{ lat: data.location.lat, lng: data.location.lon, color: pinColor }]); world.controls().autoRotate = false;
+                    mapIframe.src = `https://maps.google.com/maps?q=${data.location.lat},${data.location.lon}&hl=en&z=14&output=embed`; 
+                    mapOverlay.classList.add('hidden');
+                } else { mapOverlay.innerHTML = `<span style="color: var(--warn-yellow);">[!] No Geolocation Available</span>`; }
+            } catch (e) { display.innerHTML = "<span style='color: var(--alert-red);'>[ERROR] Upstream server offline.</span>"; mapOverlay.innerHTML = "<span style='color: var(--alert-red);'>[ERROR] Satellite Link Failed.</span>"; }
+        }
+
+        async function loadRealNews() {
+            try { const response = await fetch('/news'); const newsItems = await response.json(); let html = ""; newsItems.forEach(item => { html += `<div class="feed-item" onclick="window.open('${item.link}', '_blank')" style="cursor: pointer;"><span class="feed-date">[OSINT] ${new Date(item.pubDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>${item.title}</div>`; }); document.getElementById('newsContainer').innerHTML = html; } 
+            catch (error) { document.getElementById('newsContainer').innerHTML = `<span style="color: var(--alert-red);">Connection failed.</span>`; }
+        }
+        window.onload = () => { renderDonutChart(); loadRealNews(); initCVESlider(); };
+    </script>
+</body>
+</html>
